@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<title>Accordatore Chitarra</title>
+<style>
+body {
+    font-family: Arial;
+    text-align: center;
+    background: #111;
+    color: #fff;
+}
+
+h1 {
+    margin-top: 20px;
+}
+
+#nota {
+    font-size: 60px;
+    margin: 20px;
+}
+
+#frequenza {
+    font-size: 20px;
+}
+
+#indicatore {
+    font-size: 40px;
+    margin-top: 20px;
+}
+</style>
+</head>
+<body>
+
+<h1>Accordatore</h1>
+
+<div id="nota">--</div>
+<div id="frequenza">0 Hz</div>
+<div id="indicatore">🎤 Attiva microfono</div>
+
+<button onclick="start()">Avvia Microfono</button>
+
+<script>
+let audioContext;
+let analyser;
+let microphone;
+let dataArray;
+
+const noteStrings = ["DO","DO#","RE","RE#","MI","FA","FA#","SOL","SOL#","LA","LA#","SI"];
+
+function start() {
+    navigator.mediaDevices.getUserMedia({ audio: true })
+    .then(stream => {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioContext.createAnalyser();
+        microphone = audioContext.createMediaStreamSource(stream);
+        microphone.connect(analyser);
+
+        analyser.fftSize = 2048;
+        dataArray = new Float32Array(analyser.fftSize);
+
+        detectPitch();
+    })
+    .catch(() => {
+        alert("Permesso microfono negato");
+    });
+}
+
+function detectPitch() {
+    analyser.getFloatTimeDomainData(dataArray);
+    let freq = autoCorrelate(dataArray, audioContext.sampleRate);
+
+   if (freq !== -1) {
+    let nota = noteStrings[noteFromPitch(freq) % 12];
+    let detune = centsOffFromPitch(freq, noteFromPitch(freq));
+
+    let stato = "";
+
+    if (detune < -5) stato = "bassa";
+    else if (detune > 5) stato = "alta";
+    else stato = "ok";
+
+    inviaDatiAAppInventor(nota, freq.toFixed(2), stato);
+
+    document.getElementById("frequenza").innerText = freq.toFixed(2) + " Hz";
+    document.getElementById("nota").innerText = nota;
+
+    if (stato === "bassa") {
+        document.getElementById("indicatore").innerText = "⬇️ Bassa";
+    } else if (stato === "alta") {
+        document.getElementById("indicatore").innerText = "⬆️ Alta";
+    } else {
+        document.getElementById("indicatore").innerText = "✅ Accordata";
+    }
+}
+
+    requestAnimationFrame(detectPitch);
+}
+
+// ---- FUNZIONI AUDIO ----
+function inviaDatiAAppInventor(nota, freq, stato) {
+    if (window.AppInventor) {
+        window.AppInventor.setWebViewString(nota + "|" + freq + "|" + stato);
+    }
+}
+function autoCorrelate(buffer, sampleRate) {
+    let SIZE = buffer.length;
+    let rms = 0;
+
+    for (let i = 0; i < SIZE; i++) {
+        let val = buffer[i];
+        rms += val * val;
+    }
+    rms = Math.sqrt(rms / SIZE);
+    if (rms < 0.01) return -1;
+
+    let r1 = 0, r2 = SIZE - 1, threshold = 0.2;
+
+    for (let i = 0; i < SIZE / 2; i++) {
+        if (Math.abs(buffer[i]) < threshold) { r1 = i; break; }
+    }
+    for (let i = 1; i < SIZE / 2; i++) {
+        if (Math.abs(buffer[SIZE - i]) < threshold) { r2 = SIZE - i; break; }
+    }
+
+    buffer = buffer.slice(r1, r2);
+    SIZE = buffer.length;
+
+    let c = new Array(SIZE).fill(0);
+    for (let i = 0; i < SIZE; i++) {
+        for (let j = 0; j < SIZE - i; j++) {
+            c[i] = c[i] + buffer[j] * buffer[j + i];
+        }
+    }
+
+    let d = 0;
+    while (c[d] > c[d + 1]) d++;
+    let maxval = -1, maxpos = -1;
+    for (let i = d; i < SIZE; i++) {
+        if (c[i] > maxval) {
+            maxval = c[i];
+            maxpos = i;
+        }
+    }
+
+    let T0 = maxpos;
+    return sampleRate / T0;
+}
+
+function noteFromPitch(frequency) {
+    let noteNum = 12 * (Math.log(frequency / 440) / Math.log(2));
+    return Math.round(noteNum) + 69;
+}
+
+function frequencyFromNoteNumber(note) {
+    return 440 * Math.pow(2, (note - 69) / 12);
+}
+
+function centsOffFromPitch(frequency, note) {
+    return Math.floor(1200 * Math.log(frequency / frequencyFromNoteNumber(note)) / Math.log(2));
+}
+</script>
+
+</body>
+</html>
